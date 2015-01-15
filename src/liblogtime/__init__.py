@@ -9,7 +9,11 @@ from dbus.mainloop.glib import DBusGMainLoop
 import ctypes
 import dateutil.parser
 import time
-import pystache
+
+try:
+    import pystache
+except ImportError:
+    pass
 
 try:
     from jira.client import JIRA
@@ -345,6 +349,10 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
         if self._printJIRATickets:
             if not "JIRA" in globals():
                 print('No python-jira installed to use this feature, exiting...')
+                sys.exit(1)
+
+            if not "pystache" in globals():
+                print('No pystached installed to use this feature, exiting...')
                 sys.exit(1)
 
             self.printJIRATickets()
