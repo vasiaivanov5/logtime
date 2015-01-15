@@ -5,7 +5,6 @@ import os
 import dateutil.parser
 import time
 import pystache
-import json
 from jira.client import JIRA
 
 __author__ = "Damian Kęska"
@@ -16,17 +15,17 @@ __copyright__ = "Copyleft by FINGO Team"
 def runInstance(a=0):
     """ Run instance of application """
 
-    kernel = jiraLogTimeKernel()
-    kernel.appName = 'jira-logtime'
+    kernel = logTimeKernel()
+    kernel.appName = 'logtime'
     kernel.coreClasses['gui'] = False
     kernel.coreClasses['db'] = False
-    kernel.coreClasses['argsparsing'] = jiralogTimeArguments
+    kernel.coreClasses['argsparsing'] = logTimeArguments
     kernel.initialize(quiet=True)
     kernel.hooking.addOption('app.mainloop', kernel.mainLoop)
     kernel.main()
 
 
-class jiralogTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
+class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
     def setDebuggingMode(self, aaa = ''):
         """
             Enable debugging mode
@@ -62,7 +61,9 @@ class jiralogTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
         self.createArgument('--debug', self.setDebuggingMode, '', 'Enable debugging mode', required=False, action='store_false')
         self.createArgument('--get-jira-tickets', self.printJIRATickets, '', 'Print JIRA tickets', required=False, action='store_false')
 
-class jiraLogTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, pantheradesktop.kernel.Singleton):
+
+
+class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, pantheradesktop.kernel.Singleton):
     """
     Main class that contains mainLoop() method which is called as first right after parsing the arguments
 
@@ -110,7 +111,7 @@ class jiraLogTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, pant
         }
 
         if options['server'] == 'https://example.org/jira':
-            print("Please update ~/.jira-logtime/config.json with server, user name and password (if required)\n")
+            print("Please update ~/.logtime/config.json with server, user name and password (if required)\n")
             sys.exit(0)
 
         ## authorization
@@ -184,8 +185,12 @@ class jiraLogTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, pant
     def mainLoop(self, a=''):
         """ Application's main function """
 
+        ## mode that will print JIRA tickets user was working on in selected date or today
         if self._printJIRATickets:
             self.printJIRATickets()
+            sys.exit(0)
+
+
 
 
 
