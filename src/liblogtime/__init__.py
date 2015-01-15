@@ -2,15 +2,23 @@
 import pantheradesktop.kernel
 import sys
 import os
+import dbus
+import ctypes
 import dateutil.parser
 import time
 import pystache
-from jira.client import JIRA
+
+try:
+    from jira.client import JIRA
+except ImportError:
+    pass
+
 
 __author__ = "Damian Kęska"
 __license__ = "LGPLv3"
 __maintainer__ = "Damian Kęska"
 __copyright__ = "Copyleft by FINGO Team"
+
 
 def runInstance(a=0):
     """ Run instance of application """
@@ -23,6 +31,16 @@ def runInstance(a=0):
     kernel.initialize(quiet=True)
     kernel.hooking.addOption('app.mainloop', kernel.mainLoop)
     kernel.main()
+
+class XScreenSaverInfo( ctypes.Structure):
+
+  """ typedef struct { ... } XScreenSaverInfo; """
+  _fields_ = [('window',      ctypes.c_ulong), # screen saver window
+              ('state',       ctypes.c_int),   # off,on,disabled
+              ('kind',        ctypes.c_int),   # blanked,internal,external
+              ('since',       ctypes.c_ulong), # milliseconds
+              ('idle',        ctypes.c_ulong), # milliseconds
+              ('event_mask',  ctypes.c_ulong)] # events
 
 
 class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
@@ -182,14 +200,81 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
         print(rendered)
 
 
+    def monitorInactivityTime(self):
+        """
+        Monitor user activity and
+        :return:
+        """
+
+        if not "DISPLAY" in os.environ:
+            print('Cannot find $DISPLAY, is X11 server running?')
+            sys.exit(1)
+
+        configIdleTime = self.config.getKey('inactivity.idletime', 300, strictTypeChecking = True)
+
+        try:
+            xlib = ctypes.cdll.LoadLibrary( 'libX11.so')
+        except Exception:
+            print('Cannot load shared library libX11.so, please make sure you have installed libXss library')
+            sys.exit(1)
+
+        try:
+            self.xss = ctypes.cdll.LoadLibrary( 'libXss.so')
+        except Exception:
+            print('Cannot load shared library libX11.so, please make sure you have installed libXss library')
+            sys.exit(1)
+
+        dpy = xlib.XOpenDisplay(os.environ['DISPLAY'])
+        root = xlib.XDefaultRootWindow( dpy)
+        self.xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(XScreenSaverInfo)
+
+        while True:
+            time.sleep(1)
+            xss_info = self.xss.XScreenSaverAllocInfo()
+            self.xss.XScreenSaverQueryInfo( dpy, root, xss_info)
+            idleTime = int(int(xss_info.contents.idle)/1000)
+
+            if idleTime > configIdleTime:
+                self.idleTimeAction(idleTime)
+
+
+    def idleTimeAction(self, idleTime):
+        """
+        Execute action when computer gets idle for longer time (inactivity.idletime in config)
+        :param idleTime:
+        :return:
+        """
+
+        self.hooking.execute('inactivity.idle.run', idleTime)
+
+        try:
+            bus = dbus.SessionBus()
+            object = bus.get_object("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver")
+            interface = dbus.Interface(object, 'org.freedesktop.ScreenSaver')
+
+            if not int(interface.GetActive()):
+                interface.Lock()
+
+        except Exception as e:
+            self.logging.output('Got exception while trying to lock screen: '+str(e), 'inactivity')
+            print('Cannot connect to screensaver, please make sure you are running XScreenSaver, KScreensaver or GNOME Screensaver, or any other compatible with freedesktop interface')
+            sys.exit(1)
+
+
+
     def mainLoop(self, a=''):
         """ Application's main function """
 
         ## mode that will print JIRA tickets user was working on in selected date or today
         if self._printJIRATickets:
+            if not "JIRA" in globals():
+                print('No python-jira installed to use this feature, exiting...')
+                sys.exit(1)
+
             self.printJIRATickets()
             sys.exit(0)
 
+        self.monitorInactivityTime()
 
 
 
