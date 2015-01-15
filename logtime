@@ -6,8 +6,9 @@ import os
 try:
     import jira
 except ImportError:
-    print('Package jira-python not found, please install required dependencies')
-    sys.exit(1)
+    #print('Package jira-python not found, please install required dependencies')
+    #sys.exit(1)
+    pass
 
 __author__ = "Damian Kęska"
 __license__ = "LGPLv3"

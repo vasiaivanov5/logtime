@@ -1,12 +1,20 @@
 #-*- encoding: utf-8 -*-
 import pantheradesktop.kernel
+import pantheradesktop.tools as tools
 import sys
 import os
 import dbus
+import gobject
+from dbus.mainloop.glib import DBusGMainLoop
 import ctypes
 import dateutil.parser
 import time
 import pystache
+
+try:
+    from PySide import QtGui, QtCore
+except ImportError:
+    from PyQt4 import QtGui, QtCore
 
 try:
     from jira.client import JIRA
@@ -74,10 +82,31 @@ class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
 
         self.panthera._printJIRATickets = True
 
+    def monitorInactivity(self, value = None):
+        """
+        Set mode to monitor user inactivity
+
+        :param bool value: Default value
+        """
+
+        self.panthera._monitorInactivity = True
+
+    def displayBreakTime(self, value = None):
+        """
+        Set mode to display notifications about break time
+
+        :param bool value: Default value
+        """
+
+        self.panthera._breakTime = True
+
     def addArgs(self):
         pantheradesktop.argsparsing.pantheraArgsParsing(self)
         self.createArgument('--debug', self.setDebuggingMode, '', 'Enable debugging mode', required=False, action='store_false')
-        self.createArgument('--get-jira-tickets', self.printJIRATickets, '', 'Print JIRA tickets', required=False, action='store_false')
+        self.createArgument('--get-jira-tickets', self.printJIRATickets, '', 'Print JIRA tickets that you worked on (today or on selected date)', required=False, action='store_false')
+        self.createArgument('--date', self.setDate, '', 'Set date for JIRA tickets', required=False, action='store')
+        self.createArgument('--monitor-inactivity', self.monitorInactivity, '', 'Monitor inactivity and lock screen when ide time reaches maximum time specified in configuration key "inactivity.idletime" (unit: seconds)', required=False, action='store_false')
+        self.createArgument('--display-break-time', self.displayBreakTime, '', 'Show notifications on desktop after break time', required=False, action='store_false')
 
 
 
@@ -88,6 +117,9 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
     :author: Damian Kęska <damian@pantheraframework.org>
     """
 
+    threads = dict()
+
+    ## JIRA tickets listing
     jira = None # jira object
     jiraLogin = ""
     profile = None
@@ -95,6 +127,17 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
     _printJIRATickets = False
     _ticketsDate = "today"
     _JIRATemplate = "default"
+
+    ## monitoring activity
+    _monitorInactivity = False
+    xss = None
+    xssDpy = None
+    xssRoot = None
+
+    ## break time
+    _breakTime = False
+    screensaverlastState = None
+    screensaverTime = 0
 
     def printJIRATickets(self):
         """
@@ -199,18 +242,10 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
 
         print(rendered)
 
-
-    def monitorInactivityTime(self):
-        """
-        Monitor user activity and
-        :return:
-        """
-
+    def prepareInactivityTimeMonitoring(self):
         if not "DISPLAY" in os.environ:
             print('Cannot find $DISPLAY, is X11 server running?')
             sys.exit(1)
-
-        configIdleTime = self.config.getKey('inactivity.idletime', 300, strictTypeChecking = True)
 
         try:
             xlib = ctypes.cdll.LoadLibrary( 'libX11.so')
@@ -224,14 +259,23 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
             print('Cannot load shared library libX11.so, please make sure you have installed libXss library')
             sys.exit(1)
 
-        dpy = xlib.XOpenDisplay(os.environ['DISPLAY'])
-        root = xlib.XDefaultRootWindow( dpy)
+        self.xssDpy = xlib.XOpenDisplay(os.environ['DISPLAY'])
+        self.xssRoot = xlib.XDefaultRootWindow(self.xssDpy)
         self.xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(XScreenSaverInfo)
+
+    def monitorInactivityTime(self, thread):
+        """
+        Monitor user activity and
+        :return:
+        """
+
+        configIdleTime = self.config.getKey('inactivity.idletime', 300, strictTypeChecking = True)
+        self.logging.output('Monitoring user inactivity', 'monitorInactivity')
 
         while True:
             time.sleep(1)
             xss_info = self.xss.XScreenSaverAllocInfo()
-            self.xss.XScreenSaverQueryInfo( dpy, root, xss_info)
+            self.xss.XScreenSaverQueryInfo(self.xssDpy, self.xssRoot, xss_info)
             idleTime = int(int(xss_info.contents.idle)/1000)
 
             if idleTime > configIdleTime:
@@ -248,8 +292,8 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
         self.hooking.execute('inactivity.idle.run', idleTime)
 
         try:
-            bus = dbus.SessionBus()
-            object = bus.get_object("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver")
+            self.bus = dbus.SessionBus()
+            object = self.bus.get_object("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver")
             interface = dbus.Interface(object, 'org.freedesktop.ScreenSaver')
 
             if not int(interface.GetActive()):
@@ -260,6 +304,43 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
             print('Cannot connect to screensaver, please make sure you are running XScreenSaver, KScreensaver or GNOME Screensaver, or any other compatible with freedesktop interface')
             sys.exit(1)
 
+
+    def calculateBreakTime(self, thread):
+        """
+        Calculate break time when user gets idle and then display a notification
+        :return:
+        """
+
+        loop = gobject.MainLoop()
+        dbus.set_default_main_loop(DBusGMainLoop(set_as_default=True))
+
+        bus = dbus.SessionBus()
+        bus.add_signal_receiver(self.screensaverChangedEvent,'ActiveChanged','org.freedesktop.ScreenSaver')
+        loop.run()
+
+
+    def screensaverChangedEvent(self, state):
+        """
+        Handle screensaver state change event
+        :param bool state: 1 or 0
+        :return: None
+        """
+
+        if not self.screensaverlastState and state:
+            self.screensaverTime = time.time()
+        elif self.screensaverlastState and not state:
+            breakTime = (time.time()-self.screensaverTime)
+
+            self.hooking.execute('breaktime.time', breakTime)
+
+            if breakTime > 60:
+                breakTime = str(int(breakTime/60)) + ' minutes'
+            else:
+                breakTime = str(int(breakTime)) + ' seconds'
+
+            os.system('notify-send "logtime" "Your break time is: '+breakTime+'"')
+
+        self.screensaverlastState = state
 
 
     def mainLoop(self, a=''):
@@ -274,7 +355,19 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
             self.printJIRATickets()
             sys.exit(0)
 
-        self.monitorInactivityTime()
+        if self._breakTime:
+            t1, w2 = tools.createThread(self.calculateBreakTime)
+
+        if self._monitorInactivity:
+            self.prepareInactivityTimeMonitoring()
+            t2, w2 = tools.createThread(self.monitorInactivityTime)
+
+        if not self._monitorInactivity and not self._breakTime:
+            print('No action selected')
+            sys.exit(0)
+
+        while True:
+            time.sleep(1000)
 
 
 
@@ -294,3 +387,4 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
 
         projectsJQLString += ')'
         return projectsJQLString.replace('(OR', '(')
+
