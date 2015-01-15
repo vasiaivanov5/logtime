@@ -12,11 +12,6 @@ import time
 import pystache
 
 try:
-    from PySide import QtGui, QtCore
-except ImportError:
-    from PyQt4 import QtGui, QtCore
-
-try:
     from jira.client import JIRA
 except ImportError:
     pass
