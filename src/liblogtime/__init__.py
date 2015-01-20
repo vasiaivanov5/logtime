@@ -51,13 +51,6 @@ class XScreenSaverInfo( ctypes.Structure):
 
 
 class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
-    def setDebuggingMode(self, aaa = ''):
-        """
-            Enable debugging mode
-        """
-
-        self.panthera.logging.silent = False
-        self.panthera.logging.flushAndEnablePrinting()
 
     def setDate(self, date = ''):
         """
@@ -100,8 +93,7 @@ class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
         self.panthera._breakTime = True
 
     def addArgs(self):
-        pantheradesktop.argsparsing.pantheraArgsParsing(self)
-        self.createArgument('--debug', self.setDebuggingMode, '', 'Enable debugging mode', required=False, action='store_false')
+        pantheradesktop.argsparsing.pantheraArgsParsing(self.app)
         self.createArgument('--get-jira-tickets', self.printJIRATickets, '', 'Print JIRA tickets that you worked on (today or on selected date)', required=False, action='store_false')
         self.createArgument('--date', self.setDate, '', 'Set date for JIRA tickets', required=False, action='store')
         self.createArgument('--monitor-inactivity', self.monitorInactivity, '', 'Monitor inactivity and lock screen when ide time reaches maximum time specified in configuration key "inactivity.idletime" (unit: seconds)', required=False, action='store_false')
