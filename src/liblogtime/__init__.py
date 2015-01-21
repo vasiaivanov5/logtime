@@ -62,7 +62,7 @@ class logTimeArguments (pantheradesktop.argsparsing.pantheraArgsParsing):
         if not date or date == 'today':
             date = time.strftime("%d.%m.%Y")
 
-        self.panthera._ticketsDate = dateutil.parser.parse(date).strftime('%s')
+        self.panthera._ticketsDate = dateutil.parser.parse(date).strftime('%d.%m.%Y')
 
 
     def printJIRATickets(self, action = ''):
@@ -206,7 +206,10 @@ class logTimeKernel (pantheradesktop.kernel.pantheraDesktopApplication, panthera
             found = False
 
             for history in issue.changelog.histories:
-                historyDate = dateutil.parser.parse(history.created).strftime('%d.%m.%Y')
+                try:
+                    historyDate = dateutil.parser.parse(history.created).strftime('%d.%m.%Y')
+                except Exception:
+                    continue
 
                 if historyDate == self._ticketsDate and history.author.name == self.jiraLogin:
                     found = True
